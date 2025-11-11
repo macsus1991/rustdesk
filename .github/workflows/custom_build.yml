@@ -1,11 +1,11 @@
-name: Custom RustDesk Build
+name: Custom RustDesk Build (Native Windows)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     env:
       RELAY: ${{ secrets.RELAY }}
@@ -14,60 +14,63 @@ jobs:
       UNATTENDED_PASSWORD: ${{ secrets.UNATTENDED_PASSWORD }}
 
     steps:
-      - name: Checkout code with submodules
+      - name: Checkout source with submodules
         uses: actions/checkout@v4
         with:
-          submodules: 'recursive'
+          submodules: recursive
 
-      - name: Install dependencies for cross compilation
-        run: |
-          sudo apt update
-          sudo apt install -y build-essential clang cmake ninja-build pkg-config \
-            libgtk-3-dev libayatana-appindicator3-dev libssl-dev \
-            mingw-w64 mingw-w64-tools autoconf automake libtool
-
-      - name: Install Rust toolchain and target
+      - name: Install Rust toolchain
         run: |
           rustup set profile minimal
           rustup toolchain install stable
-          rustup target add x86_64-pc-windows-gnu
+          rustup default stable
 
-      - name: Fix libsodium cross-compile environment
+      - name: Install build dependencies
+        shell: pwsh
         run: |
-          echo "export CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
-          echo "export AR=x86_64-w64-mingw32-ar" >> $GITHUB_ENV
-          echo "export CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
-          echo "export PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
-          echo "export TARGET_HOST=x86_64-w64-mingw32" >> $GITHUB_ENV
+          choco install -y cmake ninja nasm openssl.light
+
+      - name: Verify environment
+        shell: pwsh
+        run: |
+          rustc -V
+          cargo -V
+          cmake -version
+          ninja --version
 
       - name: Prepare custom config
+        shell: pwsh
         run: |
-          mkdir -p src
-          echo "// Auto-generated custom config" > src/custom_config.rs
-          echo "pub const RENDEZVOUS_SERVER: &str = \"${RENDEZVOUS}\";" >> src/custom_config.rs
-          echo "pub const RELAY_SERVER: &str = \"${RELAY}\";" >> src/custom_config.rs
-          echo "pub const API_SERVER: &str = \"${API}\";" >> src/custom_config.rs
-          if [ ! -z "${UNATTENDED_PASSWORD}" ]; then
-            echo "pub const DEFAULT_UNATTENDED_PASSWORD: &str = \"${UNATTENDED_PASSWORD}\";" >> src/custom_config.rs
-          fi
-          echo "✅ custom_config.rs created with your server settings."
+          New-Item -ItemType Directory -Force -Path src | Out-Null
+          $file = "src/custom_config.rs"
+          Set-Content $file "// Auto-generated config for your custom RustDesk build"
+          Add-Content $file "pub const RENDEZVOUS_SERVER: &str = `"$env:RENDEZVOUS`";"
+          Add-Content $file "pub const RELAY_SERVER: &str = `"$env:RELAY`";"
+          Add-Content $file "pub const API_SERVER: &str = `"$env:API`";"
+          if ($env:UNATTENDED_PASSWORD) {
+            Add-Content $file "pub const DEFAULT_UNATTENDED_PASSWORD: &str = `"$env:UNATTENDED_PASSWORD`";"
+          }
+          Write-Host "✅ custom_config.rs created successfully"
 
-      - name: Inject config into RustDesk sources
+      - name: Inject config into RustDesk
+        shell: pwsh
         run: |
-          sed -i '1i mod custom_config;\nuse custom_config::*;' src/config.rs || echo "⚠ src/config.rs not found, skipping inject"
-          sed -i '1i mod custom_config;\nuse custom_config::*;' src/common.rs || echo "⚠ src/common.rs not found, skipping inject"
-          echo "✅ config module injected"
+          if (Test-Path "src/config.rs") {
+            (Get-Content src/config.rs) | Set-Content src/config.rs.bak
+            $inject = "mod custom_config;`nuse custom_config::*;`n"
+            (Get-Content src/config.rs.bak) | Set-Content src/config.rs
+            Add-Content -Path src/config.rs -Value $inject
+            Write-Host "✅ Injected custom_config into src/config.rs"
+          }
 
-      - name: Build RustDesk for Windows
-        env:
-          CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
-          CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
-          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
-          PKG_CONFIG_ALLOW_CROSS: 1
-        run: cargo build --release --target x86_64-pc-windows-gnu
+      - name: Build RustDesk (Release)
+        shell: pwsh
+        run: |
+          cargo build --release
+          Write-Host "✅ RustDesk build completed"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: rustdesk-custom-client
-          path: target/x86_64-pc-windows-gnu/release/rustdesk.exe
+          path: target/release/rustdesk.exe
