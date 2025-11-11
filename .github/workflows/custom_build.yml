@@ -19,18 +19,26 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Install build dependencies
+      - name: Install dependencies for cross compilation
         run: |
           sudo apt update
           sudo apt install -y build-essential clang cmake ninja-build pkg-config \
-                              libgtk-3-dev libayatana-appindicator3-dev libssl-dev \
-                              mingw-w64
+            libgtk-3-dev libayatana-appindicator3-dev libssl-dev \
+            mingw-w64 mingw-w64-tools autoconf automake libtool
 
-      - name: Install Rust toolchain for Windows
+      - name: Install Rust toolchain and target
         run: |
           rustup set profile minimal
           rustup toolchain install stable
           rustup target add x86_64-pc-windows-gnu
+
+      - name: Fix libsodium cross-compile environment
+        run: |
+          echo "export CC=x86_64-w64-mingw32-gcc" >> $GITHUB_ENV
+          echo "export AR=x86_64-w64-mingw32-ar" >> $GITHUB_ENV
+          echo "export CXX=x86_64-w64-mingw32-g++" >> $GITHUB_ENV
+          echo "export PKG_CONFIG_ALLOW_CROSS=1" >> $GITHUB_ENV
+          echo "export TARGET_HOST=x86_64-w64-mingw32" >> $GITHUB_ENV
 
       - name: Prepare custom config
         run: |
@@ -54,8 +62,9 @@ jobs:
         env:
           CC_x86_64_pc_windows_gnu: x86_64-w64-mingw32-gcc
           CXX_x86_64_pc_windows_gnu: x86_64-w64-mingw32-g++
-        run: |
-          cargo build --release --target x86_64-pc-windows-gnu
+          AR_x86_64_pc_windows_gnu: x86_64-w64-mingw32-ar
+          PKG_CONFIG_ALLOW_CROSS: 1
+        run: cargo build --release --target x86_64-pc-windows-gnu
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
