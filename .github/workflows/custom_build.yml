@@ -1,0 +1,45 @@
+name: Custom RustDesk Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      RELAY: ${{ secrets.RELAY }}
+      RENDEZVOUS: ${{ secrets.RENDEZVOUS }}
+      API: ${{ secrets.API }}
+      UNATTENDED_PASSWORD: ${{ secrets.UNATTENDED_PASSWORD }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev librust-openssl-dev
+
+      - name: Set custom config
+        run: |
+          echo "pub const RENDEZVOUS_SERVER: &str = \"${RENDEZVOUS}\";" > src/common/config_override.rs
+          echo "pub const RELAY_SERVER: &str = \"${RELAY}\";" >> src/common/config_override.rs
+          echo "pub const API_SERVER: &str = \"${API}\";" >> src/common/config_override.rs
+          if [ ! -z "${UNATTENDED_PASSWORD}" ]; then
+            echo "pub const DEFAULT_UNATTENDED_PASSWORD: &str = \"${UNATTENDED_PASSWORD}\";" >> src/common/config_override.rs
+          fi
+          echo "✅ Custom config written: src/common/config_override.rs"
+
+      - name: Build RustDesk (Windows)
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --target x86_64-pc-windows-gnu
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-custom-client
+          path: target/x86_64-pc-windows-gnu/release/rustdesk.exe
