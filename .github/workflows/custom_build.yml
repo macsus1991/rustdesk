@@ -14,17 +14,22 @@ jobs:
       UNATTENDED_PASSWORD: ${{ secrets.UNATTENDED_PASSWORD }}
 
     steps:
-      - name: Checkout code
+      - name: Checkout code with submodules
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Verify submodules
+        run: git submodule status || true
 
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev librust-openssl-dev
+          sudo apt install -y clang cmake ninja-build libgtk-3-dev libayatana-appindicator3-dev librust-openssl-dev pkg-config libssl-dev
 
       - name: Prepare custom config
         run: |
-          mkdir -p src  # гарантируем, что каталог существует
+          mkdir -p src
           echo "// Auto-generated custom config" > src/custom_config.rs
           echo "pub const RENDEZVOUS_SERVER: &str = \"${RENDEZVOUS}\";" >> src/custom_config.rs
           echo "pub const RELAY_SERVER: &str = \"${RELAY}\";" >> src/custom_config.rs
@@ -36,7 +41,6 @@ jobs:
 
       - name: Inject config into RustDesk sources
         run: |
-          # Найдём место, где объявлены константы серверов и заменим include!
           sed -i '1i mod custom_config;\nuse custom_config::*;' src/config.rs || echo "⚠ src/config.rs not found, skipping inject"
           sed -i '1i mod custom_config;\nuse custom_config::*;' src/common.rs || echo "⚠ src/common.rs not found, skipping inject"
           echo "✅ config module injected"
